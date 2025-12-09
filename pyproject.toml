@@ -1,0 +1,28 @@
+[project]
+name = "langgraph-agent"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "Your Name",email = "you@example.com"}
+]
+readme = "README.md"
+requires-python = "^3.13"
+dependencies = [
+    "langchain (>=1.0.5,<2.0.0)",
+    "langgraph (>=1.0.3,<2.0.0)",
+    "python-dotenv (>=1.2.1,<2.0.0)",
+    "langchain-google-genai (>=3.0.3,<4.0.0)",
+    "langgraph-checkpoint-sqlite (>=3.0.0,<4.0.0)",
+    "tavily-python (>=0.7.13,<0.8.0)",
+    "langchain-community (>=0.4.1,<0.5.0)",
+    "langgraph-prebuilt (>=1.0.4,<2.0.0)",
+    "langchain-tavily (>=0.2.13,<0.3.0)",
+    "google-cloud-bigquery (>=3.38.0,<4.0.0)"
+]
+
+[tool.poetry]
+packages = [{include = "langgraph_agent", from = "src"}]
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"

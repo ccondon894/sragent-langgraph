@@ -8,7 +8,7 @@ import json
 import uuid
 from datetime import datetime
 
-from sra_agent import create_sra_agent, query_sra
+from sra_agent import create_sra_agent, query_sra, set_bq_credentials
 from rate_limiter import SessionRateLimiter, RateLimitConfig
 
 
@@ -61,6 +61,22 @@ def initialize_session_state():
 
     if "query_results" not in st.session_state:
         st.session_state.query_results = []
+
+    if "credentials_loaded" not in st.session_state:
+        st.session_state.credentials_loaded = False
+
+
+def load_gcp_credentials():
+    """Load and inject GCP credentials from Streamlit secrets."""
+    try:
+        if "gcp_service_account" in st.secrets:
+            credentials_dict = dict(st.secrets["gcp_service_account"])
+            set_bq_credentials(credentials_dict)
+            return True
+        return False
+    except Exception as e:
+        st.warning(f"⚠️ Failed to load GCP credentials: {str(e)}")
+        return False
 
 
 def create_agent():
@@ -213,6 +229,11 @@ def main():
 
     # Initialize session state
     initialize_session_state()
+
+    # Load GCP credentials on first run
+    if not st.session_state.credentials_loaded:
+        load_gcp_credentials()
+        st.session_state.credentials_loaded = True
 
     # Display sidebar with rate limiting controls
     display_sidebar()

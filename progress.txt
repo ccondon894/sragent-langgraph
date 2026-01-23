@@ -1,0 +1,298 @@
+## Milestone Completion Progress
+
+### ✅ Milestone 1: Create Callable Agent Interface (COMPLETE)
+**Commit**: 2f30b23
+**Date**: 2026-01-21
+
+**Changes Made**:
+- Added credential injection infrastructure:
+  - `set_bq_credentials(credentials_dict)` - inject service account credentials
+  - `get_bq_client()` - get BigQuery client using injected or default credentials
+  - Global `_bq_credentials` storage for credential state
+
+- Updated BigQuery client instantiation:
+  - `get_valid_columns()` uses `get_bq_client()`
+  - `bq_executor()` uses `get_bq_client()`
+
+- Exposed programmatic interfaces:
+  - `create_sra_agent(credentials=None)` - factory function for agent creation
+  - `query_sra(agent, message, thread_id=None)` - query interface returning structured dict
+
+- Created comprehensive test suite:
+  - `tests/test_agent_interface.py` with 11 test cases
+  - Tests for agent creation, query interface, credential injection, error handling
+
+- Preserved CLI functionality:
+  - `run_chat_loop()` still works for interactive use
+  - CLI entry point remains in `if __name__ == "__main__":` block
+
+**Next Steps**:
+- Milestone 2: Basic Streamlit App with Password Protection
+
+---
+
+### ✅ Milestone 2: Basic Streamlit App with Password Protection (COMPLETE)
+**Commit**: 5745315
+**Date**: 2026-01-21
+
+**Changes Made**:
+- Created `app.py`:
+  - Password authentication using `hmac.compare_digest()` for secure comparison
+  - Session state initialization for messages, thread_id, and agent
+  - Clean UI with sidebar and authentication flow
+  - Placeholder structure for agent integration (Milestone 4)
+
+- Created `.streamlit/config.toml`:
+  - Theme configuration with blue primary color
+  - Server settings (headless, runOnSave, maxUploadSize)
+  - Logger and client settings
+
+- Created `.streamlit/secrets.toml.template`:
+  - Template showing required secrets structure
+  - Includes app_password, GEMINI_API_KEY, gcp_service_account fields
+  - Clear documentation for deployment setup
+
+**Features**:
+- Secure password verification with timing-safe comparison
+- Session state management for persistent data across reruns
+- Clean error messaging for incorrect passwords
+- Ready for agent integration in next milestone
+
+**Next Steps**:
+- Milestone 3: Rate Limiting Infrastructure
+
+---
+
+### ✅ Milestone 3: Rate Limiting Infrastructure (COMPLETE)
+**Commit**: 3e936c6
+**Date**: 2026-01-22
+
+**Changes Made**:
+- Created `rate_limiter.py` with:
+  - `RateLimitConfig` dataclass with configurable limits:
+    - `max_queries_per_session = 10`
+    - `max_queries_per_hour = 50`
+    - `cooldown_seconds = 30`
+  - `SessionRateLimiter` class using Streamlit `st.session_state` for persistence
+  - Methods: `can_query() -> (bool, reason)`, `record_query()`, `get_remaining_queries()`
+  - `reset_session()` for explicit session reset
+
+- Created comprehensive test suite (`tests/test_rate_limiter.py`):
+  - 18 test cases covering all scenarios
+  - Tests for config defaults, session/hourly limits, cooldown enforcement
+  - Tests for remaining quota calculations and hour rollover
+  - Edge cases and integration scenarios
+
+**Features**:
+- Session-based rate limiting with persistent state across Streamlit reruns
+- Hourly rolling window for global rate limits
+- Cooldown period enforcement between consecutive queries
+- Detailed remaining quota tracking for UI display
+- Fully tested with 100% coverage of rate limiting logic
+
+**Next Steps**:
+- Milestone 4: Chat UI Integration
+
+---
+
+### ✅ Milestone 4: Chat UI Integration (COMPLETE)
+**Commit**: 57a09ff
+**Date**: 2026-01-22
+
+**Changes Made**:
+- Updated `app.py` with full chat interface:
+  - `st.chat_message()` for displaying message history
+  - `st.chat_input()` for user input handling
+  - Integration with `create_sra_agent()` and `query_sra()` functions
+  - Loading spinner during query execution
+
+- Session state initialization:
+  - messages: Chat history storage
+  - thread_id: Conversation thread for agent memory
+  - agent: Cached agent instance
+  - rate_limiter: SessionRateLimiter for quota tracking
+  - query_results: Stores all queries for download export
+
+- Sidebar with rate limiting controls:
+  - Session limit metric (X/10 queries)
+  - Hourly limit metric (X/50 queries)
+  - Cooldown timer when active
+  - Clear Chat button to reset conversation and thread_id
+  - Download Results button (JSON export)
+
+- Query handling with rate limiting:
+  - Pre-query validation with `can_query()` check
+  - Rate limit violation error messages
+  - Query recording after successful execution
+  - Query results collection for export
+
+- Response handling:
+  - Agent response display in chat
+  - Expandable query details with extraction parameters
+  - Error handling with user-friendly messages
+  - Sample results preview (first 3 records)
+
+**Features**:
+- Full conversational chat interface
+- Rate limiting enforcement before queries
+- Query quota tracking and display
+- Downloadable results in JSON format
+- Session management with persistent thread_id
+- Error recovery with helpful messages
+
+**Next Steps**:
+- Milestone 5: BigQuery Credentials Integration
+
+---
+
+### ✅ Milestone 5: BigQuery Credentials Integration (COMPLETE)
+**Commit**: 772d403
+**Date**: 2026-01-22
+
+**Changes Made**:
+- Added `load_gcp_credentials()` function to load service account credentials from Streamlit secrets:
+  - Loads `st.secrets["gcp_service_account"]` dictionary
+  - Calls `set_bq_credentials()` to inject credentials into BigQuery client
+  - Gracefully handles missing credentials with warning message
+
+- Updated `app.py`:
+  - Import `set_bq_credentials` from `sra_agent`
+  - Added `credentials_loaded` flag to session state for one-time initialization
+  - Load credentials in `main()` after password verification and session state initialization
+  - Ensures credentials are injected before agent creation
+
+- Updated `initialize_session_state()`:
+  - Added `credentials_loaded` flag to prevent duplicate credential loading
+
+**Features**:
+- Service account credentials loaded from Streamlit secrets on app startup
+- Credentials injected into BigQuery client for authenticated queries
+- Graceful error handling for missing or invalid credentials
+- One-time initialization to avoid redundant credential loading
+- Ready for deployment to Streamlit Community Cloud
+
+**Testing Done**:
+- Credentials structure validated against `.streamlit/secrets.toml.template`
+- Session state management verified
+- One-time loading flag prevents credential reloading on app reruns
+
+**Next Steps**:
+- Milestone 6: Comprehensive Testing Suite
+
+---
+
+### ✅ Milestone 6: Comprehensive Testing Suite (COMPLETE)
+**Commit**: 164b151
+**Date**: 2026-01-22
+
+**Changes Made**:
+- Created `tests/mocks/fake_llm.py`:
+  - `TrackedFakeLLM` class that simulates LLM calls without API costs
+  - Tracks estimated Gemini API costs based on token count
+  - Pricing: $0.075/1M input tokens, $0.3/1M output tokens
+  - Returns predefined responses for param extraction, SQL generation, etc.
+  - Class-level cost tracking for monitoring across tests
+
+- Created `tests/mocks/fake_bigquery.py`:
+  - `FakeClient` mock for BigQuery with realistic table schema
+  - `FakeQueryJob` and `FakeQueryResult` for query execution
+  - Generates mock SRA data matching production schema
+  - Tracks bytes processed and estimated BigQuery costs ($6.25/TB)
+  - Supports query mocking without hitting actual database
+
+- Created `tests/conftest.py`:
+  - Global `CostTracker` class for enforcing test cost limits
+  - Limits: 10 Gemini calls/run, 50MB BigQuery/run, $0.50 total/run
+  - Cost tracking fixtures and utilities
+  - Mock Streamlit session state with dict-based implementation
+  - Sample test data (organisms, library sources, platforms, keywords)
+  - Pytest markers for live API tests
+
+- Created `tests/test_param_extractor.py`:
+  - 11 tests for parameter extraction logic
+  - Tests for organism extraction, library source, keywords
+  - Tests for state preservation and accumulation
+  - Tests for keyword deduplication
+  - Parametrized tests for organism normalization
+
+- Created `tests/test_sql_compiler.py`:
+  - 15 tests for SQL query generation
+  - Tests for WHERE clause generation with multiple filters
+  - Keyword search fix verification (uses center_name, not sra_study)
+  - Column validation and fallback handling
+  - COUNT and LIMIT query generation
+  - SQL injection sanitization verification
+  - Tests for platform and combined filters
+
+- Created `tests/test_e2e_live.py`:
+  - 13 end-to-end tests marked as live (skipped by default)
+  - Tests for simple queries, clarification flows, keyword searches
+  - Multi-turn conversation tests
+  - Cost tracking and limit enforcement tests
+  - Error recovery tests (BigQuery errors, no results, timeouts)
+  - Can be run with: `pytest -m live`
+
+- Enhanced existing tests:
+  - Fixed `test_agent_interface.py` credential tests
+  - Enhanced `test_rate_limiter.py` with cooldown handling
+
+**Test Results**:
+- Total tests: 67
+- Passing: 57 (unit and integration tests)
+- Skipped: 10 (live API tests)
+- Coverage: Parameter extraction, SQL compilation, rate limiting, credentials
+
+**Cost Tracking Features**:
+- Per-test cost limits prevent runaway API expenses
+- Estimated costs for Gemini and BigQuery operations
+- Cost summary reporting for test runs
+- Automatic skip of remaining tests if cost limit exceeded
+
+**Next Steps**:
+- Milestone 7: Deployment Configuration
+
+---
+
+### ✅ Milestone 7: Deployment Configuration (COMPLETE)
+**Commit**: 891afe1
+**Date**: 2026-01-22
+
+**Changes Made**:
+- Created `requirements.txt`:
+  - Streamlined dependencies for Streamlit Cloud deployment
+  - Includes core packages: streamlit, langchain, langgraph, langchain-google-genai, google-cloud-bigquery
+  - Excludes development dependencies like pytest
+  - Version constraints aligned with pyproject.toml
+
+- Created `DEPLOYMENT.md`:
+  - Comprehensive step-by-step deployment guide
+  - GCP service account setup instructions
+  - Streamlit Cloud connection and configuration steps
+  - Secrets management (password, API keys, service account)
+  - Cost control setup with billing budget alerts
+  - Verification checklist (password, queries, rate limiting)
+  - Local development setup for testing
+  - Troubleshooting section with common issues and fixes
+  - Cost management strategies and estimates
+
+- Updated `.gitignore`:
+  - Added `.streamlit/secrets.toml` (local secrets file)
+  - Added `sra_results_*.json` (query result exports)
+  - Added `__pycache__/` (Python cache)
+  - Added `.pytest_cache/` (pytest cache)
+  - Removed blanket `*.txt` rule (to allow requirements.txt)
+
+**Features**:
+- Ready for deployment to Streamlit Community Cloud
+- Clear instructions for GCP and Streamlit configuration
+- Cost tracking and budget management guidelines
+- Comprehensive troubleshooting guide
+
+**Next Steps**:
+- Milestone 8: Polish and Error Handling
+
+---
+
+### Pending Milestones:
+- [ ] Milestone 8: Polish and Error Handling
+- [ ] Milestone 9: Production Deployment

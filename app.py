@@ -65,6 +65,69 @@ def initialize_session_state():
     if "credentials_loaded" not in st.session_state:
         st.session_state.credentials_loaded = False
 
+    if "error_count" not in st.session_state:
+        st.session_state.error_count = 0
+
+
+def trim_chat_history(max_messages: int = 20):
+    """Trim chat history to prevent memory issues.
+
+    Keeps only the most recent messages, maintaining conversation context.
+    """
+    if len(st.session_state.messages) > max_messages:
+        removed_count = len(st.session_state.messages) - max_messages
+        st.session_state.messages = st.session_state.messages[-max_messages:]
+        return removed_count
+    return 0
+
+
+def clear_session_on_error():
+    """Clear problematic session state to allow recovery."""
+    st.session_state.error_count += 1
+    if st.session_state.error_count > 2:
+        # Reset agent after multiple errors
+        st.session_state.agent = None
+        st.session_state.error_count = 0
+
+
+def get_error_recovery_message(error: Exception) -> tuple[str, str]:
+    """Generate user-friendly error message with recovery suggestions.
+
+    Returns: (user_message, recovery_suggestion)
+    """
+    error_str = str(error).lower()
+
+    if "bigquery" in error_str or "database" in error_str:
+        return (
+            "❌ Database connection error",
+            "The SRA database is temporarily unavailable. Please try again in a few moments."
+        )
+    elif "timeout" in error_str or "deadline" in error_str:
+        return (
+            "❌ Query timeout",
+            "The query took too long to complete. Try a more specific search (e.g., narrow down by organism or platform)."
+        )
+    elif "authentication" in error_str or "credentials" in error_str:
+        return (
+            "❌ Authentication error",
+            "There's an issue with the database credentials. Please contact the administrator."
+        )
+    elif "no results" in error_str or "zero" in error_str:
+        return (
+            "⚠️ No results found",
+            "Your query didn't match any records. Try using different keywords or organisms."
+        )
+    elif "rate limit" in error_str:
+        return (
+            "❌ Rate limit exceeded",
+            "You've exceeded your query limit. Please wait before trying again."
+        )
+    else:
+        return (
+            "❌ Unexpected error",
+            "An unexpected error occurred. Try refreshing the page or clearing the chat."
+        )
+
 
 def load_gcp_credentials():
     """Load and inject GCP credentials from Streamlit secrets."""
@@ -123,7 +186,15 @@ def display_sidebar():
             st.session_state.messages = []
             st.session_state.query_results = []
             st.session_state.thread_id = str(uuid.uuid4())
+            st.session_state.error_count = 0
             st.rerun()
+
+        # Reset agent button (hidden by default)
+        if st.session_state.error_count > 0:
+            if st.button("🔄 Reset Agent", use_container_width=True, help="Click if agent is unresponsive"):
+                st.session_state.agent = None
+                st.session_state.error_count = 0
+                st.rerun()
 
         # Download results button
         if st.session_state.query_results:
@@ -152,7 +223,7 @@ def display_chat_history():
 
 
 def handle_user_input():
-    """Handle user input and agent response."""
+    """Handle user input and agent response with enhanced error handling."""
     if prompt := st.chat_input("Ask about genomic data..."):
         # Check rate limit before processing
         can_query, reason = st.session_state.rate_limiter.can_query()
@@ -164,14 +235,24 @@ def handle_user_input():
         # Add user message to chat
         st.session_state.messages.append({"role": "user", "content": prompt})
 
+        # Trim chat history to prevent memory issues (keep last 20 messages)
+        removed = trim_chat_history(max_messages=20)
+        if removed > 0:
+            st.info(f"💾 Trimmed chat history (removed {removed} old messages to free memory)")
+
         # Get agent response
         agent = create_agent()
         if agent is None:
             st.error("❌ Agent is not initialized. Please refresh the page.")
+            st.session_state.messages.pop()
             return
 
         with st.spinner("🔄 Querying the SRA database..."):
+            progress_placeholder = st.empty()
+
             try:
+                progress_placeholder.info("🔍 Extracting parameters from your query...")
+
                 # Query the agent
                 result = query_sra(
                     agent,
@@ -179,8 +260,11 @@ def handle_user_input():
                     thread_id=st.session_state.thread_id
                 )
 
+                progress_placeholder.info("💾 Processing results...")
+
                 # Record the query for rate limiting
                 st.session_state.rate_limiter.record_query()
+                st.session_state.error_count = 0  # Reset error count on success
 
                 # Store result for download
                 st.session_state.query_results.append({
@@ -192,6 +276,9 @@ def handle_user_input():
                 # Add assistant response to chat
                 response_text = result.get("response", "No response generated")
                 st.session_state.messages.append({"role": "assistant", "content": response_text})
+
+                progress_placeholder.empty()
+                st.success("✅ Query completed successfully!")
 
                 # Display additional context if available
                 if result.get("results"):
@@ -208,9 +295,25 @@ def handle_user_input():
                 st.rerun()
 
             except Exception as e:
-                st.error(f"❌ Error querying agent: {str(e)}")
+                progress_placeholder.empty()
+
+                # Get user-friendly error message
+                error_title, recovery_msg = get_error_recovery_message(e)
+
+                # Display error with recovery suggestion
+                st.error(error_title)
+                st.info(f"💡 {recovery_msg}")
+
+                # Show technical details in expander for debugging
+                with st.expander("📋 Technical Details"):
+                    st.code(str(e), language="text")
+
+                # Clear session state on error
+                clear_session_on_error()
+
                 # Remove the user message if there was an error
-                st.session_state.messages.pop()
+                if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
+                    st.session_state.messages.pop()
 
 
 def main():

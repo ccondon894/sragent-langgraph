@@ -12,9 +12,24 @@ from rate_limiter import RateLimitConfig, SessionRateLimiter
 @pytest.fixture
 def session_state():
     """Mock Streamlit session_state object."""
-    state = MagicMock()
-    state.query_timestamps = []
-    state.queries_in_session = 0
+    # Use a dictionary-based mock that supports 'in' operator
+    class MockSessionState(dict):
+        """Mock session state that acts like both dict and object."""
+        def __getattr__(self, name):
+            try:
+                return self[name]
+            except KeyError:
+                raise AttributeError(name)
+
+        def __setattr__(self, name, value):
+            self[name] = value
+
+        def __contains__(self, name):
+            return dict.__contains__(self, name)
+
+    state = MockSessionState()
+    state['query_timestamps'] = []
+    state['queries_in_session'] = 0
     return state
 
 
@@ -76,12 +91,20 @@ class TestCanQuery:
         assert allowed is True
         assert reason == ""
 
-    def test_allows_multiple_queries_within_limits(self, rate_limiter):
+    def test_allows_multiple_queries_within_limits(self, session_state):
         """Test that queries within all limits are allowed."""
+        # Disable cooldown for this test so we can query rapidly
+        config = RateLimitConfig(
+            max_queries_per_session=10,
+            max_queries_per_hour=50,
+            cooldown_seconds=0
+        )
+        limiter = SessionRateLimiter(session_state, config)
+
         for i in range(5):
-            allowed, reason = rate_limiter.can_query()
-            assert allowed is True, f"Query {i+1} should be allowed"
-            rate_limiter.record_query()
+            allowed, reason = limiter.can_query()
+            assert allowed is True, f"Query {i+1} should be allowed: {reason}"
+            limiter.record_query()
 
     @patch("rate_limiter.datetime")
     def test_blocks_cooldown(self, mock_datetime, session_state):
@@ -109,7 +132,7 @@ class TestCanQuery:
 
     def test_blocks_session_limit(self, session_state):
         """Test that session limit blocks queries."""
-        config = RateLimitConfig(max_queries_per_session=3)
+        config = RateLimitConfig(max_queries_per_session=3, cooldown_seconds=0)
         limiter = SessionRateLimiter(session_state, config)
 
         # Record 3 queries
@@ -295,15 +318,19 @@ class TestResetSession:
 class TestEndToEndLimiting:
     """End-to-end tests for complete limiting scenarios."""
 
-    def test_full_workflow(self, rate_limiter):
+    def test_full_workflow(self, session_state):
         """Test a complete workflow of queries and limits."""
+        # Disable cooldown for this test
+        config = RateLimitConfig(cooldown_seconds=0)
+        limiter = SessionRateLimiter(session_state, config)
+
         # First few queries should succeed
         for i in range(3):
-            allowed, reason = rate_limiter.can_query()
+            allowed, reason = limiter.can_query()
             assert allowed is True
-            rate_limiter.record_query()
+            limiter.record_query()
 
-        remaining = rate_limiter.get_remaining_queries()
+        remaining = limiter.get_remaining_queries()
         assert remaining["remaining_session"] == 7
 
     @patch("rate_limiter.datetime")

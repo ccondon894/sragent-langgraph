@@ -409,3 +409,60 @@ The SRA Agent Streamlit App is now fully prepared for deployment to Streamlit Co
 - [ ] Monitor application and costs
 
 ---
+
+### ✅ Milestone 10: Switch to Vertex AI Backend via Service Account (COMPLETE)
+**Commit**: 31a5b47
+**Date**: 2026-01-22
+
+**Changes Made**:
+- Updated `pyproject.toml`:
+  - Upgraded `langchain-google-genai` from v3.0.3 to v4.0.0+
+  - langchain-google-genai v4.0+ includes native Vertex AI backend support via `vertexai=True`
+
+- Updated `sra_agent.py`:
+  - Added `_gcp_project` global variable to track service account project ID
+  - Enhanced `set_bq_credentials()` to extract and store project ID from credentials dict
+  - Refactored `create_sra_agent()` to:
+    - Accept optional `credentials` parameter (service account dict)
+    - When credentials provided: create new ChatGoogleGenerativeAI instance with `vertexai=True`
+    - Pass service account credentials and project ID to the LLM
+    - Dynamically rebuild the graph with the new LLM instance
+    - Cache and return the compiled graph
+  - Imported `ServiceAccountCredentials` from `google.oauth2.service_account`
+
+- Updated `app.py`:
+  - Modified `create_agent()` to extract credentials from `st.secrets["gcp_service_account"]`
+  - Pass credentials dict to `create_sra_agent()` for Vertex AI backend initialization
+
+- Updated `.streamlit/secrets.toml.template`:
+  - Removed `GEMINI_API_KEY` reference (no longer needed)
+  - Updated documentation to clarify service account is used for both Vertex AI and BigQuery
+
+- Updated `requirements.txt`:
+  - Changed `langchain-google-genai>=3.0.3,<4.0.0` to `langchain-google-genai>=4.0.0,<5.0.0`
+
+**Key Features**:
+- **Single Authentication**: Use same service account credentials for both Vertex AI (LLM) and BigQuery
+- **Vertex AI Backend**: Leverages v4.0+ `vertexai=True` parameter instead of API key
+- **Dynamic Graph Building**: Graph is rebuilt when credentials are injected
+- **Simplified Secrets**: No need for separate GEMINI_API_KEY
+- **Unified Billing**: All API costs tracked under single GCP project/service account
+
+**GCP Prerequisites** (for deployment):
+- Enable Vertex AI API in GCP Console
+- Grant service account `Vertex AI User` role (`roles/aiplatform.user`):
+  ```bash
+  gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
+    --member="serviceAccount:YOUR_SERVICE_ACCOUNT_EMAIL" \
+    --role="roles/aiplatform.user"
+  ```
+
+**Testing Done**:
+- Code changes verified for proper credential injection
+- Graph building logic tested for dynamic LLM creation
+- Session state management ensures credentials are passed correctly
+
+**Next Steps**:
+- Milestone 11: Update Documentation and Verify Vertex AI Backend
+
+---

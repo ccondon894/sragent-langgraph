@@ -146,7 +146,11 @@ def create_agent():
     """Create and cache the SRA agent."""
     if st.session_state.agent is None:
         try:
-            st.session_state.agent = create_sra_agent()
+            # Pass service account credentials to enable Vertex AI backend
+            credentials_dict = None
+            if "gcp_service_account" in st.secrets:
+                credentials_dict = dict(st.secrets["gcp_service_account"])
+            st.session_state.agent = create_sra_agent(credentials=credentials_dict)
         except Exception as e:
             st.error(f"❌ Failed to initialize agent: {str(e)}")
             st.session_state.agent = None

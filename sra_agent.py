@@ -20,19 +20,22 @@ load_dotenv()
 # ============================================================================
 # Credential Management for Programmatic Access
 # ============================================================================
-# Global credential storage for BigQuery client injection
+# Global credential storage for BigQuery and Vertex AI client injection
 _bq_credentials = None
+_gcp_project = None
 
 def set_bq_credentials(credentials_dict: Dict[str, Any]) -> None:
     """
-    Inject BigQuery service account credentials for programmatic use.
+    Inject BigQuery and Vertex AI service account credentials for programmatic use.
 
     Args:
         credentials_dict: Service account JSON as dictionary
                          (from google.oauth2.service_account.Credentials.from_service_account_info)
     """
-    global _bq_credentials
+    global _bq_credentials, _gcp_project
     _bq_credentials = credentials_dict
+    if credentials_dict:
+        _gcp_project = credentials_dict.get("project_id")
 
 def get_bq_client() -> bigquery.Client:
     """
@@ -764,14 +767,80 @@ def create_sra_agent(credentials: Dict[str, Any] = None) -> Any:
     Factory function to create an SRA agent instance with optional credential injection.
 
     Args:
-        credentials: Optional BigQuery service account credentials dict.
-                    If provided, will be used for all BigQuery operations.
+        credentials: Optional service account credentials dict for both BigQuery and Vertex AI.
+                    If provided, will be used for all BigQuery and Vertex AI LLM operations.
 
     Returns:
         Compiled LangGraph agent (Runnable)
     """
+    global llm, structured_llm, structured_sql_llm, app
+
     if credentials:
         set_bq_credentials(credentials)
+
+        # Create a new LLM with Vertex AI backend and service account credentials
+        from google.oauth2.service_account import Credentials as ServiceAccountCredentials
+        creds = ServiceAccountCredentials.from_service_account_info(credentials)
+        project_id = credentials.get("project_id")
+
+        # Create LLM with Vertex AI backend using service account credentials
+        llm = ChatGoogleGenerativeAI(
+            model="gemini-2.5-flash",
+            vertexai=True,
+            project=project_id,
+            location="us-central1",
+            credentials=creds
+        )
+
+        # Rebuild structured output chains with the new LLM
+        structured_llm = llm.with_structured_output(SRAExtraction)
+        structured_sql_llm = llm.with_structured_output(SQLComponents)
+
+        # Rebuild the graph with the new LLM instances
+        # (All node functions reference the global llm, structured_llm, structured_sql_llm)
+        workflow_new = StateGraph(SRAQueryState)
+
+        # Add all our nodes
+        workflow_new.add_node("extract_params", param_extractor)
+        workflow_new.add_node("ask_clarification", clarifier)
+        workflow_new.add_node("generate_sql", sql_compiler)
+        workflow_new.add_node("execute_query", bq_executor)
+        workflow_new.add_node("synthesize_response", response_synthesizer)
+
+        # Set the Entry Point
+        workflow_new.set_entry_point("extract_params")
+
+        # After extraction, decide: Ask user OR Write SQL?
+        workflow_new.add_conditional_edges(
+            "extract_params",
+            check_slots,
+            {
+                "missing_info": "ask_clarification",
+                "ready_to_query": "generate_sql"
+            }
+        )
+
+        workflow_new.add_edge("ask_clarification", "synthesize_response")
+        workflow_new.add_edge("generate_sql", "execute_query")
+
+        # After SQL Query, determine path based on results
+        workflow_new.add_conditional_edges(
+            "execute_query",
+            check_execution,
+            {
+                "sql_error": "generate_sql",
+                "zero_results": "synthesize_response",
+                "success": "synthesize_response",
+                "max_retries": "synthesize_response"
+            }
+        )
+
+        # Final edge: synthesizer goes to END
+        workflow_new.add_edge("synthesize_response", END)
+
+        memory = MemorySaver()
+        app = workflow_new.compile(checkpointer=memory)
+
     return app
 
 def query_sra(agent: Any, message: str, thread_id: str = None) -> Dict[str, Any]:

@@ -1,6 +1,10 @@
 .env
 agentic_router.py
-*.txt
 first_script.py
 langgraph_query_router.py
+*secrets.toml
+.streamlit/secrets.toml
+sra_results_*.json
+__pycache__/
+.pytest_cache/
 

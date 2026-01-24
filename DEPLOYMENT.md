@@ -8,7 +8,7 @@ This guide walks through deploying the SRA Agent to Streamlit Community Cloud.
 - Streamlit Community Cloud account (free at https://streamlit.io/cloud)
 - Google Cloud Project with:
   - BigQuery API enabled
-  - Generative AI API enabled (for Google Gemini)
+  - Vertex AI API enabled (for Gemini models)
   - Service Account with appropriate permissions
 
 ## Step 1: Prepare GCP Service Account
@@ -19,8 +19,8 @@ This guide walks through deploying the SRA Agent to Streamlit Community Cloud.
    - Click "Create Service Account"
    - Name: `sra-agent-streamlit`
    - Grant these roles:
-     - `BigQuery Data Editor` (for querying)
-     - `Generative AI User` (for Gemini API)
+     - `BigQuery Job User` (`roles/bigquery.jobUser`) - for executing queries
+     - `Vertex AI User` (`roles/aiplatform.user`) - for Gemini models via Vertex AI
 
 2. **Create and download JSON key**:
    - Open the service account
@@ -29,8 +29,14 @@ This guide walks through deploying the SRA Agent to Streamlit Community Cloud.
    - Download the file (keep it secure!)
 
 3. **Enable APIs** in your GCP project:
+   ```bash
+   gcloud services enable bigquery.googleapis.com
+   gcloud services enable aiplatform.googleapis.com
+   ```
+
+   Or via GCP Console:
    - BigQuery API
-   - Generative AI API (required for langchain-google-genai)
+   - Vertex AI API (required for Gemini models via langchain-google-genai)
 
 ## Step 2: Deploy to Streamlit Community Cloud
 
@@ -56,10 +62,8 @@ This guide walks through deploying the SRA Agent to Streamlit Community Cloud.
    # Password for app access
    app_password = "your_secure_password_here"
 
-   # Google Gemini API Key (optional if using service account)
-   GEMINI_API_KEY = "your_gemini_api_key"
-
    # GCP Service Account (from downloaded JSON file)
+   # Used for both Vertex AI (LLM) and BigQuery authentication
    [gcp_service_account]
    type = "service_account"
    project_id = "your-project-id"
@@ -82,9 +86,9 @@ This guide walks through deploying the SRA Agent to Streamlit Community Cloud.
    - Create a budget with a limit (e.g., $5/month)
    - Set alert threshold to 50% and 100%
 
-2. **Monitor usage** (free tier provides):
+2. **Monitor usage**:
    - BigQuery: 1TB free per month
-   - Gemini API: Generous free tier for testing
+   - Vertex AI (Gemini): Pay-as-you-go pricing (see GCP pricing)
 
 3. **Track app usage**:
    - Check Streamlit Cloud dashboard for logs
@@ -133,7 +137,16 @@ streamlit run app.py
 
 ### Issue: "BigQuery permission denied"
 - **Cause**: Service account missing required roles
-- **Fix**: Grant `BigQuery Data Editor` and `Generative AI User` roles in GCP
+- **Fix**: Grant `roles/bigquery.jobUser` and `roles/aiplatform.user` roles in GCP:
+  ```bash
+  gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
+    --member="serviceAccount:YOUR_SERVICE_ACCOUNT_EMAIL" \
+    --role="roles/bigquery.jobUser"
+
+  gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
+    --member="serviceAccount:YOUR_SERVICE_ACCOUNT_EMAIL" \
+    --role="roles/aiplatform.user"
+  ```
 
 ### Issue: "Rate limit exceeded"
 - **Cause**: Too many queries in short time
@@ -145,9 +158,9 @@ streamlit run app.py
 
 ## Cost Management
 
-**Estimated monthly costs** (with typical usage):
+**Estimated monthly costs** (with typical usage and rate limiting):
 - BigQuery: $0-5 (1TB free, $6.25/TB after)
-- Gemini API: $0-2 (generous free tier)
+- Vertex AI (Gemini): $0-10 (depends on usage; rate limited to 10 queries/session, 50/hour)
 - Streamlit Cloud: Free (community tier)
 
 **To reduce costs**:

@@ -466,3 +466,63 @@ The SRA Agent Streamlit App is now fully prepared for deployment to Streamlit Co
 - Milestone 11: Update Documentation and Verify Vertex AI Backend
 
 ---
+
+### ✅ Milestone 11: Update Documentation and Verify Vertex AI Backend (COMPLETE)
+**Commit**: ac59a27
+**Date**: 2026-01-24
+
+**Changes Made**:
+- Updated `DEPLOYMENT.md`:
+  - Changed "Generative AI API" references to "Vertex AI API"
+  - Updated service account role requirements to use proper role IDs:
+    - `roles/bigquery.jobUser` (previously "BigQuery Data Editor")
+    - `roles/aiplatform.user` (previously "Generative AI User")
+  - Added gcloud commands for enabling required APIs (bigquery.googleapis.com, aiplatform.googleapis.com)
+  - Removed `GEMINI_API_KEY` from secrets configuration (no longer needed)
+  - Documented that service account is used for both Vertex AI and BigQuery authentication
+  - Added gcloud commands for granting IAM roles in troubleshooting section
+  - Updated cost estimates to reflect Vertex AI pricing model
+
+- Updated `CLAUDE.md` (user instruction file, not in repo):
+  - Changed tech stack from "Google Gemini API" to "Google Vertex AI (Gemini)"
+  - Documented Vertex AI backend authentication via service account
+  - Added comprehensive GCP service account role requirements with gcloud commands
+  - Removed GEMINI_API_KEY references (now only used for legacy CLI scripts)
+  - Added comprehensive Streamlit app documentation (app.py as production interface)
+  - Added rate_limiter.py documentation
+  - Updated project structure to show production files (app.py, rate_limiter.py, etc.)
+  - Updated main entry points to prioritize Streamlit app over CLI
+  - Added GCP setup instructions section
+  - Updated common tasks to show Streamlit app as primary interface
+  - Updated test suite documentation (67 tests, cost tracking)
+  - Refreshed project history to reflect current production state
+
+- Verified `requirements.txt`:
+  - Already has correct version: `langchain-google-genai>=4.0.0,<5.0.0` ✓
+
+**Documentation Updates Complete**:
+- All references to GEMINI_API_KEY removed from production documentation
+- Service account authentication properly documented
+- GCP role requirements clearly specified with role IDs
+- Vertex AI API properly documented as the LLM backend
+- Deployment guide updated with correct API enablement steps
+
+**Status**:
+All 11 milestones from the PRD are now complete. The SRA Agent Streamlit app is:
+- ✅ Fully refactored for web use with callable interface
+- ✅ Deployed as a Streamlit web app with password protection
+- ✅ Protected by comprehensive rate limiting
+- ✅ Integrated with BigQuery via service account
+- ✅ Using Vertex AI backend for LLM (single service account auth)
+- ✅ Fully tested with comprehensive test suite
+- ✅ Production-ready with deployment configuration
+- ✅ Polished with error handling and UI improvements
+- ✅ Documented for deployment and maintenance
+
+**Next Steps** (Manual):
+- [ ] Deploy to Streamlit Community Cloud (if not already deployed)
+- [ ] Verify end-to-end functionality in production
+- [ ] Monitor costs and usage
+- [ ] Adjust rate limits based on actual usage patterns
+
+---

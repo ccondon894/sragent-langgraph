@@ -14,8 +14,29 @@ from google.cloud import bigquery
 from dotenv import load_dotenv
 from datetime import datetime
 import time
+import logging
 
 load_dotenv()
+
+# ============================================================================
+# Debug Logging Utility (Milestone 12)
+# ============================================================================
+# Comprehensive node-level logging for diagnosing graph execution flow
+
+logging.basicConfig(level=logging.INFO, format='%(message)s')
+logger = logging.getLogger("sra_agent")
+
+def log_node(name: str, event: str, **kwargs):
+    """Log node entry/exit with timestamp and state values."""
+    ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+    details = ", ".join(f"{k}={v}" for k, v in kwargs.items())
+    logger.info(f"[{ts}] [NODE:{name}] [{event}] {details}")
+
+def log_router(name: str, decision: str, **kwargs):
+    """Log routing decisions with timestamp and relevant state values."""
+    ts = datetime.now().strftime("%H:%M:%S.%f")[:-3]
+    details = ", ".join(f"{k}={v}" for k, v in kwargs.items())
+    logger.info(f"[{ts}] [ROUTER:{name}] {details} -> {decision}")
 
 # ============================================================================
 # Credential Management for Programmatic Access
@@ -47,7 +68,10 @@ def get_bq_client() -> bigquery.Client:
     """
     if _bq_credentials:
         from google.oauth2.service_account import Credentials
-        creds = Credentials.from_service_account_info(_bq_credentials)
+        creds = Credentials.from_service_account_info(
+            _bq_credentials,
+            scopes=["https://www.googleapis.com/auth/cloud-platform"]
+        )
         return bigquery.Client(credentials=creds, project=_bq_credentials.get("project_id"))
     else:
         return bigquery.Client()
@@ -173,18 +197,19 @@ ORGANISM_ALIASES = {
 class SRAExtraction(BaseModel):
     """
     Schema for extracting SRA query parameters from user input.
+    All string fields should be short categorical values, NOT prose or descriptions.
     """
     organism: Optional[str] = Field(
-        None, description="The species, e.g., 'Homo sapiens' or 'Mus musculus'."
+        None, description="Species name ONLY (e.g., 'Homo sapiens', 'Mus musculus'). Must be a short species name, not a description."
     )
     library_source: Optional[str] = Field(
-        None, description="The library source type, e.g., 'TRANSCRIPTOMIC', 'METAGENOMIC', 'GENOMIC'."
+        None, description="MUST be one of: TRANSCRIPTOMIC, GENOMIC, METAGENOMIC, TRANSCRIPTOMIC SINGLE CELL, GENOMIC SINGLE CELL, VIRAL RNA, SYNTHETIC, OTHER. Return null if not mentioned."
     )
     platform: Optional[str] = Field(
-        None, description="The sequencing platform, e.g., 'ILLUMINA', 'OXFORD_NANOPORE'."
+        None, description="MUST be one of: ILLUMINA, OXFORD_NANOPORE, PACBIO, ION_TORRENT, HELICOS. Return null if not mentioned."
     )
     keywords: Optional[List[str]] = Field(
-        None, description="A list of relevant search keywords, e.g., ['cancer', 'lung', 'metagenomics']."
+        None, description="Short keyword list (e.g., ['cancer', 'lung']). Each keyword should be 1-3 words max."
     )
 
     @field_validator('organism')
@@ -210,6 +235,11 @@ class SRAExtraction(BaseModel):
         if v is None:
             return v
 
+        # Reject hallucinated prose (anything over 50 chars is clearly wrong)
+        if len(v) > 50:
+            print(f"   Warning: Rejecting hallucinated library_source (length={len(v)})")
+            return None
+
         v_upper = v.upper()
 
         # Direct match
@@ -221,7 +251,7 @@ class SRAExtraction(BaseModel):
             return LIBRARY_SOURCE_ALIASES[v_upper]
 
         # Return None on mismatch - triggers clarifier to ask user
-        print(f"   Warning: Unknown library source '{v}' - will ask for clarification")
+        print(f"   Warning: Unknown library source '{v[:50]}' - will ask for clarification")
         return None
 
     @field_validator('platform')
@@ -230,6 +260,11 @@ class SRAExtraction(BaseModel):
         """Validate and normalize platform values."""
         if v is None:
             return v
+
+        # Reject hallucinated prose (anything over 30 chars is clearly wrong)
+        if len(v) > 30:
+            print(f"   Warning: Rejecting hallucinated platform (length={len(v)})")
+            return None
 
         v_upper = v.upper()
 
@@ -242,8 +277,25 @@ class SRAExtraction(BaseModel):
             return PLATFORM_ALIASES[v_upper]
 
         # Return None on mismatch - triggers clarifier to ask user
-        print(f"   Warning: Unknown platform '{v}' - will ask for clarification")
+        print(f"   Warning: Unknown platform '{v[:30]}' - will ask for clarification")
         return None
+
+    @field_validator('keywords')
+    @classmethod
+    def validate_keywords(cls, v):
+        """Validate keywords - reject hallucinated prose."""
+        if v is None:
+            return v
+
+        # Filter out any keywords that are too long (hallucinated sentences)
+        clean_keywords = []
+        for kw in v:
+            if len(kw) <= 50:  # Keywords should be short
+                clean_keywords.append(kw)
+            else:
+                print(f"   Warning: Rejecting hallucinated keyword (length={len(kw)})")
+
+        return clean_keywords if clean_keywords else None
 
 # Schema for SQL component generation
 class SQLComponents(BaseModel):
@@ -271,24 +323,27 @@ structured_sql_llm = llm.with_structured_output(SQLComponents)
 param_extractor_prompt = ChatPromptTemplate.from_messages(
     [
         ("system",
-         "You are an expert SRA Metadata extractor.\n "
+         "You are an expert SRA Metadata extractor.\n"
          "Your goal is to fill the following JSON schema: {{organism, library_source, platform, keywords}}.\n"
-         "Current State: {existing_state_json} Latest User Input: {user_input}\n"
+         "Current State: {existing_state_json}\n"
+         "Latest User Input: {user_input}\n\n"
          "INSTRUCTIONS:\n"
-         "1. Update the Current State with information from the Latest User Input.\n"
-         "2. Organism mapping:\n"
+         "1. Update the Current State with ANY information from the Latest User Input.\n"
+         "2. IMPORTANT: If the user provides a single word or short phrase (like 'transcriptomic', 'RNA-seq', 'genomic', 'human'),\n"
+         "   interpret it as filling in a missing field from the Current State.\n"
+         "3. Organism mapping:\n"
          "   - 'Human' → 'Homo sapiens'\n"
          "   - 'Mouse' → 'Mus musculus'\n"
          "   - Otherwise return the species name as-is\n"
-         "3. Library Source mapping (use UPPERCASE):\n"
-         "   - 'RNA-seq', 'transcriptomic', 'mRNA' → 'TRANSCRIPTOMIC'\n"
-         "   - 'WGS', 'genome', 'genomic' → 'GENOMIC'\n"
-         "   - 'metagenome', 'environmental' → 'METAGENOMIC'\n"
+         "4. Library Source mapping (use UPPERCASE):\n"
+         "   - 'RNA-seq', 'transcriptomic', 'mRNA', 'RNA' → 'TRANSCRIPTOMIC'\n"
+         "   - 'WGS', 'genome', 'genomic', 'DNA' → 'GENOMIC'\n"
+         "   - 'metagenome', 'environmental', 'metagenomic' → 'METAGENOMIC'\n"
          "   - 'single cell' with transcriptomic → 'TRANSCRIPTOMIC SINGLE CELL'\n"
          "   - 'single cell' with genomic → 'GENOMIC SINGLE CELL'\n"
-         "4. Platform values (UPPERCASE): ILLUMINA, OXFORD_NANOPORE, PACBIO, ION_TORRENT, HELICOS\n"
-         "5. Keywords: Extract any biological terms (tissues, diseases, sample types)\n"
-         "6. Return the merged JSON."),
+         "5. Platform values (UPPERCASE): ILLUMINA, OXFORD_NANOPORE, PACBIO, ION_TORRENT, HELICOS\n"
+         "6. Keywords: Extract any biological terms (tissues, diseases, sample types)\n"
+         "7. Return the merged JSON with updated values."),
          ("human", "{input}")
     ]
 )
@@ -302,6 +357,36 @@ def param_extractor(state: SRAQueryState) -> Dict[str, Any]:
     old_source = state.get("library_source")
     old_platform = state.get("platform")
     old_keywords = state.get("keywords") or []
+
+    # DEBUG: Log node entry
+    log_node("param_extractor", "entry",
+             organism=old_organism,
+             library_source=old_source,
+             platform=old_platform,
+             keywords=old_keywords,
+             msg_preview=latest_message[:50] if latest_message else None)
+
+    # 1.5 PRE-LLM: Simple string matching for clarification responses
+    # This catches cases where user just says "transcriptomic" or "ILLUMINA"
+    msg_upper = latest_message.strip().upper()
+    pre_matched_source = None
+    pre_matched_platform = None
+
+    # Check for library source matches
+    if msg_upper in LIBRARY_SOURCE_ALIASES:
+        pre_matched_source = LIBRARY_SOURCE_ALIASES[msg_upper]
+        print(f"   Pre-LLM match: library_source = {pre_matched_source}")
+    elif msg_upper in VALID_LIBRARY_SOURCES:
+        pre_matched_source = msg_upper
+        print(f"   Pre-LLM match: library_source = {pre_matched_source}")
+
+    # Check for platform matches
+    if msg_upper in PLATFORM_ALIASES:
+        pre_matched_platform = PLATFORM_ALIASES[msg_upper]
+        print(f"   Pre-LLM match: platform = {pre_matched_platform}")
+    elif msg_upper in VALID_PLATFORMS:
+        pre_matched_platform = msg_upper
+        print(f"   Pre-LLM match: platform = {pre_matched_platform}")
 
     # 2. Get the NEW data (LLM Extraction)
     # We pass the old state to the prompt so the LLM knows context,
@@ -322,12 +407,27 @@ def param_extractor(state: SRAQueryState) -> Dict[str, Any]:
     new_data = extracted_data.model_dump()
 
     # 3. The Manual "Save" Logic (Use new if exists, otherwise keep old)
+    # Priority: LLM extraction > Pre-LLM match > Old value
     # This ensures we never overwrite a value with None
 
     final_organism = new_data['organism'] if new_data['organism'] else old_organism
-    final_source = new_data['library_source'] if new_data['library_source'] else old_source
-    final_platform = new_data['platform'] if new_data['platform'] else old_platform
-    
+
+    # For library_source: LLM > pre-match > old
+    if new_data['library_source']:
+        final_source = new_data['library_source']
+    elif pre_matched_source:
+        final_source = pre_matched_source
+    else:
+        final_source = old_source
+
+    # For platform: LLM > pre-match > old
+    if new_data['platform']:
+        final_platform = new_data['platform']
+    elif pre_matched_platform:
+        final_platform = pre_matched_platform
+    else:
+        final_platform = old_platform
+
     # For keywords, we might want to add to the list, not replace
     new_keywords = new_data.get('keywords')
     if new_keywords:
@@ -336,12 +436,23 @@ def param_extractor(state: SRAQueryState) -> Dict[str, Any]:
         final_keywords = old_keywords
 
     # 4. Return the fully reconstructed state
-    return {
+    result = {
         "organism": final_organism,
         "library_source": final_source,
         "platform": final_platform,
         "keywords": final_keywords
     }
+
+    # DEBUG: Log node exit
+    log_node("param_extractor", "exit",
+             organism=final_organism,
+             library_source=final_source,
+             platform=final_platform,
+             keywords=final_keywords,
+             pre_matched_source=pre_matched_source,
+             llm_extracted_source=new_data.get('library_source'))
+
+    return result
 
 
 # 2. clarifier node
@@ -363,6 +474,12 @@ def clarifier(state: SRAQueryState) -> Dict[str, Any]:
     # Identify all fields that are currently None
     missing_fields = [field for field in MANDATORY_FIELDS if state.get(field) is None]
 
+    # DEBUG: Log node entry
+    log_node("clarifier", "entry",
+             organism=state.get("organism"),
+             library_source=state.get("library_source"),
+             missing_fields=missing_fields)
+
     # Generate the clarification question using the missing fields string
     missing_fields_str = ','.join(missing_fields)
     clarification_text = clarifier_chain.invoke({
@@ -372,15 +489,29 @@ def clarifier(state: SRAQueryState) -> Dict[str, Any]:
     # Format results as an AIMessage
     clarification_message = AIMessage(content=clarification_text)
 
+    # DEBUG: Log node exit
+    log_node("clarifier", "exit",
+             missing_fields=missing_fields,
+             clarification_preview=clarification_text[:60] if clarification_text else None)
+
     return {"messages": [clarification_message]}
 
 # Router for checking if all required info has been filled
 def check_slots(state: SRAQueryState) -> str:
+    organism = state.get("organism")
+    library_source = state.get("library_source")
 
-    if state.get("organism") is not None and state.get("library_source") is not None:
-        return "ready_to_query"
+    if organism is not None and library_source is not None:
+        decision = "ready_to_query"
     else:
-        return "missing_info"
+        decision = "missing_info"
+
+    # DEBUG: Log routing decision
+    log_router("check_slots", decision,
+               organism=organism,
+               library_source=library_source)
+
+    return decision
 
 # 3. sql_compiler node
 
@@ -438,7 +569,10 @@ Previous Error: {error_context}
 Search Parameters:
 - Organism: {organism}
 - Library Source: {source}
+- Platform: {platform}
 - Keywords: {keywords}
+
+(Empty parameters should be ignored - do not filter on empty values)
 
 Output ONLY the WHERE clause conditions (without the WHERE keyword).
 Example: "organism = 'Homo sapiens' AND librarysource = 'TRANSCRIPTOMIC'"
@@ -447,15 +581,29 @@ Example: "organism = 'Homo sapiens' AND librarysource = 'TRANSCRIPTOMIC'"
 def sql_compiler(state: SRAQueryState) -> Dict[str, Any]:
 
     print("---Generating SQL WHERE clause---")
-    # Prepare context
-    error_msg = state.get("error_message", "")
-    error_context = f"The previous query failed: {error_msg}" if error_msg else "None"
 
-    # Prepare parameters for prompt
+    # Get current retry count BEFORE incrementing
+    current_retry = state.get("retry_count", 0)
+
+    # DEBUG: Log node entry
+    log_node("sql_compiler", "entry",
+             retry_count=current_retry,
+             organism=state.get("organism"),
+             library_source=state.get("library_source"),
+             platform=state.get("platform"),
+             keywords=state.get("keywords"),
+             has_error=bool(state.get("error_message")))
+
+    # Prepare context
+    error_msg = state.get("error_message") or ""
+    error_context = f"The previous query failed: {error_msg}" if error_msg else "No previous errors"
+
+    # Prepare parameters for prompt (convert None to empty string)
     params = {
-        "organism": state["organism"],
-        "source": state.get("library_source", ""),
-        "keywords": ", ".join(state.get("keywords", [])),
+        "organism": state.get("organism") or "",
+        "source": state.get("library_source") or "",
+        "platform": state.get("platform") or "",
+        "keywords": ", ".join(state.get("keywords") or []),
         "error_context": error_context
     }
 
@@ -503,6 +651,13 @@ def sql_compiler(state: SRAQueryState) -> Dict[str, Any]:
 
     # Increment retry count and reset error message
     retry_count = state.get("retry_count", 0) + 1
+
+    # DEBUG: Log node exit
+    log_node("sql_compiler", "exit",
+             retry_count=retry_count,
+             where_clause_preview=where_clause[:80] if where_clause else "(empty)",
+             columns=safe_columns)
+
     return {
         "count_sql": count_sql.strip(),
         "generated_sql": sample_sql.strip(),
@@ -513,6 +668,14 @@ def sql_compiler(state: SRAQueryState) -> Dict[str, Any]:
 # 4. BigQuery executor node
 # Connects to the real NIH SRA BigQuery dataset
 def bq_executor(state: SRAQueryState) -> Dict[str, Any]:
+
+    # DEBUG: Log node entry
+    log_node("bq_executor", "entry",
+             retry_count=state.get("retry_count", 0),
+             has_count_sql=bool(state.get("count_sql")),
+             has_sample_sql=bool(state.get("generated_sql")))
+
+    start_time = time.time()
 
     try:
         # Initialize BigQuery client (uses injected credentials or environment)
@@ -548,6 +711,15 @@ def bq_executor(state: SRAQueryState) -> Dict[str, Any]:
         results = [dict(row) for row in query_job.result()]
         print(f"   Retrieved {len(results)} sample records")
 
+        elapsed = time.time() - start_time
+
+        # DEBUG: Log node exit (success)
+        log_node("bq_executor", "exit",
+                 status="SUCCESS",
+                 elapsed_sec=f"{elapsed:.2f}",
+                 total_count=total_count,
+                 result_count=len(results))
+
         return {
             "query_results": results,
             "total_count": total_count,
@@ -558,7 +730,18 @@ def bq_executor(state: SRAQueryState) -> Dict[str, Any]:
         # Capture BigQuery errors (invalid schema, syntax, auth, etc.)
         error_msg = str(e)
         print(f"   BigQuery Error: {error_msg}")
-        return {"error_message": error_msg}
+
+        elapsed = time.time() - start_time
+
+        # DEBUG: Log node exit (error)
+        log_node("bq_executor", "exit",
+                 status="ERROR",
+                 elapsed_sec=f"{elapsed:.2f}",
+                 error_preview=error_msg[:100] if error_msg else None)
+
+        # Explicitly set query_results to None to prevent check_execution from hitting unexpected state
+        # (Milestone 13 fix: ensures error OR results is always set)
+        return {"error_message": error_msg, "query_results": None}
 
 # Router to verify successful execution of SQL query
 def check_execution(state: SRAQueryState) -> Literal["success", "zero_results", "sql_error", "max_retries"]:
@@ -570,19 +753,60 @@ def check_execution(state: SRAQueryState) -> Literal["success", "zero_results", 
     results = state.get("query_results")
     retry_count = state.get("retry_count", 0)
 
+    # Determine result type for logging
+    results_type = type(results).__name__
+    results_len = len(results) if results is not None else "N/A"
+
     # Check if we've hit max retries (max 3 attempts)
     if error and retry_count >= 3:
-        return "max_retries"
+        decision = "max_retries"
+        log_router("check_execution", decision,
+                   error=bool(error),
+                   error_preview=str(error)[:50] if error else None,
+                   results_type=results_type,
+                   results_len=results_len,
+                   retry_count=retry_count)
+        return decision
 
     if error:
-        return "sql_error"
+        decision = "sql_error"
+        log_router("check_execution", decision,
+                   error=bool(error),
+                   error_preview=str(error)[:50] if error else None,
+                   results_type=results_type,
+                   results_len=results_len,
+                   retry_count=retry_count)
+        return decision
 
     # if results list empty, criteria was too strict
     if results is not None and len(results) == 0:
-        return "zero_results"
+        decision = "zero_results"
+        log_router("check_execution", decision,
+                   error=bool(error),
+                   results_type=results_type,
+                   results_len=results_len,
+                   retry_count=retry_count)
+        return decision
 
     if results and len(results) > 0:
-        return "success"
+        decision = "success"
+        log_router("check_execution", decision,
+                   error=bool(error),
+                   results_type=results_type,
+                   results_len=results_len,
+                   retry_count=retry_count)
+        return decision
+
+    # Catch-all: unexpected state (e.g., error=None and results=None)
+    # This can happen if bq_executor fails in an unexpected way
+    logger.warning(f"check_execution: UNEXPECTED STATE - error={error}, results_type={results_type}, retry_count={retry_count}")
+    log_router("check_execution", "sql_error (catch-all)",
+               error=bool(error),
+               results_type=results_type,
+               results_len=results_len,
+               retry_count=retry_count)
+    # Treat as sql_error to trigger retry logic (Milestone 13 fix)
+    return "sql_error"
 
 # 5. Response synthesizer node
 # Generates conversational summaries and logs results
@@ -591,18 +815,18 @@ synthesis_prompt = ChatPromptTemplate.from_messages([
     ("system",
      "You are a helpful SRA assistant. Summarize the query results for a researcher.\n"
      "When summarizing:\n"
-     "1. First, confirm what was searched (organism, library_source, keywords)\n"
+     "1. First, confirm what was searched\n"
      "2. Report dataset count and platforms represented\n"
      "3. Highlight notable studies or patterns\n"
      "Keep the summary concise and actionable."),
-    ("human", "Search: {organism} {strategy} {keywords}\nFound {count} datasets:\n{sample}")
+    ("human", "Search criteria: {search}\nFound {count} datasets:\n{sample}")
 ])
 
 error_synthesis_prompt = ChatPromptTemplate.from_messages([
     ("system",
-     "You are a helpful SRA assistant. The user's query encountered an error.\n"
-     "Explain the error in plain language and suggest how they might refine their search."),
-    ("human", "Error: {error}\nSearch was: {organism} {strategy} {keywords}")
+     "You are a helpful SRA assistant. The user's query encountered an error or returned no results.\n"
+     "Explain what happened in plain language and suggest how they might refine their search."),
+    ("human", "Error: {error}\nSearch criteria: {search}")
 ])
 
 def _write_results_log(state: SRAQueryState, thread_id: str) -> None:
@@ -634,55 +858,87 @@ def _write_results_log(state: SRAQueryState, thread_id: str) -> None:
 
 def response_synthesizer(state: SRAQueryState) -> Dict[str, Any]:
     """Synthesize conversational response for all query outcomes."""
-    results = state.get("query_results", [])
+    results = state.get("query_results")  # None means no query was run, [] means empty results
     error = state.get("error_message")
     retry_count = state.get("retry_count", 0)
     total_count = state.get("total_count")
 
-    organism = state.get("organism", "unknown")
-    source = state.get("library_source", "unknown")
-    keywords = ", ".join(state.get("keywords", [])) if state.get("keywords") else "none"
+    # Determine result type for logging
+    results_type = type(results).__name__
+    results_len = len(results) if results is not None else "N/A"
+
+    # DEBUG: Log node entry
+    log_node("response_synthesizer", "entry",
+             error=bool(error),
+             results_type=results_type,
+             results_len=results_len,
+             retry_count=retry_count,
+             total_count=total_count)
+
+    # Build search description with only non-empty values
+    search_parts = []
+    organism = state.get("organism")
+    source = state.get("library_source")
+    keywords_list = state.get("keywords") or []
+
+    if organism:
+        search_parts.append(f"organism: {organism}")
+    if source:
+        search_parts.append(f"library source: {source}")
+    if keywords_list:
+        search_parts.append(f"keywords: {', '.join(keywords_list)}")
+
+    search_description = "; ".join(search_parts) if search_parts else "no specific criteria"
+
+    branch = None  # Track which branch we take
 
     try:
         if error and retry_count >= 3:
+            branch = "max_retries_error"
             # Max retries exceeded
             summary = (
                 error_synthesis_prompt | llm | StrOutputParser()
             ).invoke({
                 "error": error,
-                "organism": organism,
-                "strategy": source,
-                "keywords": keywords
+                "search": search_description
             })
             message = f"Unfortunately, the query couldn't be fixed after {retry_count} attempts.\n\n{summary}"
 
         elif error:
+            branch = "error_not_max_retries"
             # Error but not max retries (shouldn't happen with current routing)
             summary = (
                 error_synthesis_prompt | llm | StrOutputParser()
             ).invoke({
                 "error": error,
-                "organism": organism,
-                "strategy": source,
-                "keywords": keywords
+                "search": search_description
             })
             message = summary
 
-        elif results is not None and len(results) == 0:
-            # No results found
+        elif results is None:
+            branch = "no_query_ran_from_clarifier"
+            # No query was run (came from clarifier) - don't add another message
+            # The clarifier already added a clarification question to messages
+            log_node("response_synthesizer", "exit",
+                     branch=branch,
+                     returning="empty_dict")
+            return {}
+
+        elif len(results) == 0:
+            branch = "zero_results"
+            # Query ran but no results found
             summary = (
                 error_synthesis_prompt | llm | StrOutputParser()
             ).invoke({
                 "error": "No datasets matched the search criteria.",
-                "organism": organism,
-                "strategy": source,
-                "keywords": keywords
+                "search": search_description
             })
             message = summary
 
         else:
             # Success - check if result set is very large and suggest narrowing
             if total_count and total_count > 10000:
+                branch = "success_large_dataset"
                 message = (
                     f"Found {total_count:,} datasets matching your search. "
                     f"That's a lot of data! Here's a sample of {len(results)} datasets to preview.\n\n"
@@ -696,22 +952,27 @@ def response_synthesizer(state: SRAQueryState) -> Dict[str, Any]:
                 sample_results = json.dumps(results[:5], indent=2)
                 message += sample_results
             else:
+                branch = "success_normal"
                 # Standard summary for normal-sized result sets
                 sample_results = json.dumps(results[:10], indent=2)
                 total_str = f"{total_count:,} total, showing {len(results)}" if total_count else f"{len(results)}"
                 summary = (
                     synthesis_prompt | llm | StrOutputParser()
                 ).invoke({
-                    "organism": organism,
-                    "strategy": source,
-                    "keywords": keywords,
+                    "search": search_description,
                     "count": total_str,
                     "sample": sample_results
                 })
                 message = summary
 
     except Exception as e:
+        branch = "exception"
         message = f"Error generating summary: {str(e)}"
+
+    # DEBUG: Log node exit
+    log_node("response_synthesizer", "exit",
+             branch=branch,
+             message_len=len(message) if message else 0)
 
     return {"messages": [AIMessage(content=message)]}
 
@@ -780,7 +1041,10 @@ def create_sra_agent(credentials: Dict[str, Any] = None) -> Any:
 
         # Create a new LLM with Vertex AI backend and service account credentials
         from google.oauth2.service_account import Credentials as ServiceAccountCredentials
-        creds = ServiceAccountCredentials.from_service_account_info(credentials)
+        creds = ServiceAccountCredentials.from_service_account_info(
+            credentials,
+            scopes=["https://www.googleapis.com/auth/cloud-platform"]
+        )
         project_id = credentials.get("project_id")
 
         # Create LLM with Vertex AI backend using service account credentials

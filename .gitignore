@@ -7,4 +7,10 @@ langgraph_query_router.py
 sra_results_*.json
 __pycache__/
 .pytest_cache/
+ralph-once.sh
+PRD.md
+DEPLOYMENT_CHECKLIST.md
+DEPLOYMENT.md
+errors.txt
+progress.txt
 

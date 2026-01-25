@@ -526,3 +526,119 @@ All 11 milestones from the PRD are now complete. The SRA Agent Streamlit app is:
 - [ ] Adjust rate limits based on actual usage patterns
 
 ---
+
+### ✅ Milestone 12: Add Node-Level Debug Logging (COMPLETE)
+**Date**: 2026-01-24
+
+**Problem Addressed**:
+Agent was getting stuck when library_source forced to TRANSCRIPTOMIC. Needed visibility into graph execution flow to diagnose infinite loop or slowness.
+
+**Changes Made**:
+- Added logging utility module to `sra_agent.py`:
+  - `log_node(name, event, **kwargs)` - logs node entry/exit with timestamp
+  - `log_router(name, decision, **kwargs)` - logs routing decisions with state values
+  - Uses Python's `logging` module with INFO level
+
+- Instrumented all 5 nodes with entry/exit logging:
+  1. **param_extractor**: Logs old values, pre-LLM matches, final merged values
+  2. **clarifier**: Logs missing fields and clarification preview
+  3. **sql_compiler**: Logs retry_count, input params, WHERE clause preview
+  4. **bq_executor**: Logs execution timing, success/error status, result count
+  5. **response_synthesizer**: Logs which branch taken (max_retries, error, clarifier, zero_results, success)
+
+- Instrumented 2 routing functions:
+  1. **check_slots**: Logs organism, library_source, and routing decision
+  2. **check_execution**: Logs error state, results type/length, retry_count, decision
+     - Added warning log when unexpected state detected (no condition matched)
+
+**Logging Format**:
+```
+[HH:MM:SS.mmm] [NODE:name] [entry|exit] key=value, key=value
+[HH:MM:SS.mmm] [ROUTER:name] key=value -> decision
+```
+
+**Example Output**:
+```
+[10:15:32.123] [NODE:param_extractor] [entry] organism=None, library_source=None
+[10:15:33.456] [NODE:param_extractor] [exit] organism=Homo sapiens, library_source=TRANSCRIPTOMIC
+[10:15:33.457] [ROUTER:check_slots] organism=Homo sapiens, library_source=TRANSCRIPTOMIC -> ready_to_query
+[10:15:33.458] [NODE:sql_compiler] [entry] retry_count=0
+[10:15:35.789] [NODE:sql_compiler] [exit] retry_count=1, where_clause_preview=organism = 'Homo sapiens'...
+[10:15:35.790] [NODE:bq_executor] [entry] has_count_sql=True, has_sample_sql=True
+[10:15:45.123] [NODE:bq_executor] [exit] status=SUCCESS, elapsed_sec=9.33, result_count=100
+[10:15:45.124] [ROUTER:check_execution] results_type=list, results_len=100, retry_count=1 -> success
+```
+
+**Files Modified**:
+- `sra_agent.py` - Added logging utility and instrumented all nodes/routers
+
+**Verification**:
+- Python syntax check passed: `python -m py_compile sra_agent.py`
+- Logging will appear in:
+  - CLI: Terminal output when running `poetry run python sra_agent.py`
+  - Streamlit: Terminal where `streamlit run app.py` is running
+
+**Next Steps**:
+- Milestone 13: Fix check_execution Missing Return Bug
+
+---
+
+### ✅ Milestone 13: Fix check_execution Missing Return Bug (COMPLETE)
+**Date**: 2026-01-24
+
+**Problem Addressed**:
+The `check_execution` routing function had no return statement when `error=None` AND `results=None`. This caused the function to implicitly return `None`, which could lead to undefined routing behavior in LangGraph.
+
+**Root Cause Analysis**:
+- `bq_executor` on error only returned `{"error_message": error_msg}` without setting `query_results`
+- If a previous invocation set `query_results` and a subsequent error occurred, stale state could cause confusion
+- The routing function had 4 conditions but no catch-all, leaving a gap for the `error=None, results=None` case
+
+**Changes Made**:
+
+1. **Fixed `check_execution` (lines 798-807)**:
+   - Added catch-all return at end of function
+   - Returns `"sql_error"` to trigger retry logic for unexpected states
+   - Preserves existing warning log for debugging
+   - Updated log message to indicate "(catch-all)" for clarity
+
+   ```python
+   # Catch-all: unexpected state (e.g., error=None and results=None)
+   logger.warning(f"check_execution: UNEXPECTED STATE - ...")
+   log_router("check_execution", "sql_error (catch-all)", ...)
+   return "sql_error"  # Trigger retry logic
+   ```
+
+2. **Fixed `bq_executor` error handling (line 742)**:
+   - Now explicitly sets `query_results` to `None` on error
+   - Ensures `check_execution` always has either `error` OR `results` set
+   - Prevents unexpected state where both are `None`
+
+   ```python
+   return {"error_message": error_msg, "query_results": None}
+   ```
+
+**Why `sql_error` for catch-all?**:
+- Triggers the retry loop (generate_sql → execute_query)
+- Allows the system to attempt recovery
+- retry_count will still increment and eventually hit max_retries
+- Better than crashing or hanging indefinitely
+
+**Files Modified**:
+- `sra_agent.py` - Fixed both `check_execution` and `bq_executor`
+
+**Verification**:
+- Python syntax check passed: `python -m py_compile sra_agent.py`
+- All routing paths now have explicit returns
+- Unexpected states will trigger warning logs for diagnosis
+
+**Impact**:
+- Eliminates potential for undefined routing behavior
+- Provides graceful degradation for edge cases
+- Combined with Milestone 12 logging, any unexpected states will be visible in logs
+
+**Next Steps**:
+- Test the agent to verify the infinite loop issue is resolved
+- Monitor logs for any "UNEXPECTED STATE" warnings
+
+---

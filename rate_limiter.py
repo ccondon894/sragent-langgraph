@@ -15,7 +15,7 @@ class RateLimitConfig:
 
     max_queries_per_session: int = 10
     max_queries_per_hour: int = 50
-    cooldown_seconds: int = 30
+    cooldown_seconds: int = 10
 
 
 class SessionRateLimiter:

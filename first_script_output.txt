@@ -1,7 +1,0 @@
-User: What is the capital of France?
-{'messages': [HumanMessage(content='What is the capital of France?', additional_kwargs={}, response_metadata={}, id='850b648a-c187-4f42-8db4-2e23fa27099f'), AIMessage(content='The capital of France is Paris! 🥐🇫🇷', additional_kwargs={}, response_metadata={'prompt_feedback': {'block_reason': 0, 'safety_ratings': []}, 'finish_reason': 'STOP', 'model_name': 'gemini-2.0-flash', 'safety_ratings': [], 'model_provider': 'google_genai'}, id='lc_run--75a42b19-9059-4dfb-a75f-82f7ae123af4-0', usage_metadata={'input_tokens': 23, 'output_tokens': 12, 'total_tokens': 35, 'input_token_details': {'cache_read': 0}})]}
-Graphy: The capital of France is Paris! 🥐🇫🇷
-
-User: Tell me a fun fact about it.
-{'messages': [HumanMessage(content='Tell me a fun fact about the capital of France.', additional_kwargs={}, response_metadata={}, id='308b61c3-f9a2-4e42-8697-32961d99b4f1'), AIMessage(content='Did you know that Paris only has one stop sign in the entire city? ', additional_kwargs={}, response_metadata={'prompt_feedback': {'block_reason': 0, 'safety_ratings': []}, 'finish_reason': 'STOP', 'model_name': 'gemini-2.0-flash', 'safety_ratings': [], 'model_provider': 'google_genai'}, id='lc_run--a6ec26a1-cb46-49da-a9dd-ff0bbde02541-0', usage_metadata={'input_tokens': 27, 'output_tokens': 17, 'total_tokens': 44, 'input_token_details': {'cache_read': 0}})]}
-Graphy: Did you know that Paris only has one stop sign in the entire city? 

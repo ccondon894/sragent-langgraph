@@ -40,7 +40,7 @@ class TestE2ELiveQueries:
         # Cost estimate: ~$0.02
 
         # In practice:
-        # from sra_agent import create_sra_agent, query_sra
+        # from langgraph_agent import create_sra_agent, query_sra
         #
         # agent = create_sra_agent()
         # result = query_sra(

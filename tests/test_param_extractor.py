@@ -21,28 +21,16 @@ class TestParamExtractor:
             HumanMessage(content="Find human RNA-seq data")
         ]
 
-        # Mock the LLM to return a specific extraction
-        mock_extraction = MagicMock()
-        mock_extraction.model_dump.return_value = {
+        # Simulate param extraction logic
+        result = {
             "organism": "Homo sapiens",
             "library_source": None,
             "platform": None,
             "keywords": [],
         }
 
-        with patch("sra_agent.param_extractor_prompt") as mock_prompt:
-            mock_prompt.__or__.return_value.invoke.return_value = mock_extraction
-
-            # Simulate param extraction logic
-            result = {
-                "organism": "Homo sapiens",
-                "library_source": None,
-                "platform": None,
-                "keywords": [],
-            }
-
-            assert result["organism"] == "Homo sapiens"
-            assert result["library_source"] is None
+        assert result["organism"] == "Homo sapiens"
+        assert result["library_source"] is None
 
     def test_extracts_library_source(self, sample_sra_query_state):
         """Test extraction of library source (TRANSCRIPTOMIC, GENOMIC, etc)."""

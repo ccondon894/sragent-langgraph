@@ -1,12 +1,11 @@
 # SRA Agent - LangGraph Multi-Agent System
 
-A sophisticated multi-agent system built with LangGraph for querying scientific genomic data (Sequence Read Archive) using natural language. Features a production-ready Streamlit web interface with authentication and rate limiting.
+A multi-agent system built with LangGraph for querying scientific genomic data (Sequence Read Archive) using natural language. Features a Streamlit web interface with authentication and rate limiting.
 
 ## Overview
 
 This project demonstrates advanced LangGraph patterns through a conversational AI agent that translates natural language queries into BigQuery SQL, executes them against the NCBI Sequence Read Archive (SRA), and returns synthesized results.
 
-**Live Demo**: [Streamlit Community Cloud](https://your-app-url.streamlit.app) (requires password)
 
 ## Features
 
@@ -19,15 +18,6 @@ This project demonstrates advanced LangGraph patterns through a conversational A
 - Cost protection with query quotas and cooldowns
 - Export results as JSON
 
-## Tech Stack
-
-- **Python 3.13+**
-- **LangGraph** - Graph-based agent orchestration
-- **LangChain** - LLM framework and tooling
-- **Google Vertex AI** - Gemini models via service account auth
-- **Google BigQuery** - SRA database queries
-- **Streamlit** - Web application interface
-- **Poetry** - Dependency management
 
 ## Quick Start
 
@@ -35,9 +25,9 @@ This project demonstrates advanced LangGraph patterns through a conversational A
 
 - Python 3.13 or higher
 - GCP service account with:
-  - `roles/aiplatform.user` (Vertex AI access)
+  - `roles/aiplatform.user` (Agent Platform API access)
   - `roles/bigquery.jobUser` (BigQuery query execution)
-- Vertex AI API and BigQuery API enabled in your GCP project
+- Agent Platform API and BigQuery API enabled in your GCP project
 
 ### Installation
 
@@ -107,19 +97,25 @@ The agent will:
 ## Project Structure
 
 ```
-/langgraph-agent/
-├── app.py                    # Streamlit web app 
-├── sra_agent.py              # Main SRA agent logic
-├── rate_limiter.py           # Rate limiting module
-├── agentic_router.py         # Research & writing agent example
-├── langgraph_query_router.py # Classification routing example
-├── first_script.py           # Basic chatbot prototype
-├── .streamlit/               # Streamlit configuration
-│   ├── config.toml
-│   └── secrets.toml.template
-├── tests/                    # Comprehensive test suite
-├── pyproject.toml            # Poetry dependencies
-└── requirements.txt          # Streamlit Cloud dependencies
+├── README.md
+├── app.py
+├── pyproject.toml
+├── src
+│   └── langgraph_agent
+│       ├── __init__.py 
+│       ├── agent.py
+│       ├── clients.py
+│       ├── config.py
+│       ├── graph.py
+│       ├── logging_utils.py
+│       ├── nodes.py
+│       ├── prompts.py
+│       ├── routers.py
+│       ├── schemas.py
+│       ├── state.py
+│       └── validators.py
+├── tests
+└── uv.lock
 ```
 
 ## Rate Limiting
@@ -127,47 +123,7 @@ The agent will:
 The web app enforces the following limits for cost protection:
 - 10 queries per session
 - 50 queries per hour (rolling window)
-- 30-second cooldown between queries
-
-## Testing
-
-Run the test suite:
-```bash
-# Run all tests (mocked, no API costs)
-pytest tests/
-
-# Run live API tests (requires credentials, incurs costs)
-pytest -m live
-```
-
-Test coverage includes:
-- Parameter extraction and validation
-- SQL query generation
-- Rate limiting enforcement
-- Agent workflows
-- Error handling
-
-## Architecture
-
-The SRA agent uses a sophisticated workflow:
-
-```
-User Query → Parameter Extraction → Clarification (if needed) →
-SQL Compilation → BigQuery Execution → Response Synthesis → User
-```
-
-Key patterns:
-- **Conditional Edge Routing**: Dynamic flow based on state
-- **State Persistence**: Conversation memory using MemorySaver
-- **Type-Safe State**: TypedDict and Pydantic validation
-- **Cached Schema**: 24-hour BigQuery schema caching
-- **Error Recovery**: Retry logic for transient failures
-
-## Documentation
-
-- **CLAUDE.md** - Comprehensive codebase reference and architecture guide
-- **DEPLOYMENT.md** - Detailed deployment instructions for Streamlit Cloud
-- **KEYWORD_SEARCH_FIX.md** - Bug fix documentation
+- 10-second cooldown between queries
 
 ## GCP Service Account Setup
 
@@ -189,13 +145,3 @@ gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
 ## Contributing
 
 This is a demonstration project showing LangGraph patterns and multi-agent architectures. Feel free to use it as a reference for your own agents.
-
-## License
-
-[Your License Here]
-
-## Acknowledgments
-
-- Built with LangGraph and LangChain
-- Uses Google Vertex AI (Gemini) and BigQuery
-- SRA data from NCBI's Sequence Read Archive

@@ -8,7 +8,9 @@ import json
 import uuid
 from datetime import datetime
 
-from sra_agent import create_sra_agent, query_sra, set_bq_credentials
+from langgraph_agent.clients import set_bq_credentials
+from langgraph_agent.agent import create_sra_agent, query_sra 
+
 from rate_limiter import SessionRateLimiter, RateLimitConfig
 
 
@@ -35,7 +37,7 @@ def check_password() -> bool:
     )
 
     if "password_correct" in st.session_state and not st.session_state["password_correct"]:
-        st.error("❌ Incorrect password")
+        st.error("Incorrect password")
 
     return False
 
@@ -55,7 +57,7 @@ def initialize_session_state():
         config = RateLimitConfig(
             max_queries_per_session=10,
             max_queries_per_hour=50,
-            cooldown_seconds=30
+            cooldown_seconds=15
         )
         st.session_state.rate_limiter = SessionRateLimiter(st.session_state, config)
 
@@ -99,32 +101,32 @@ def get_error_recovery_message(error: Exception) -> tuple[str, str]:
 
     if "bigquery" in error_str or "database" in error_str:
         return (
-            "❌ Database connection error",
+            "Database connection error",
             "The SRA database is temporarily unavailable. Please try again in a few moments."
         )
     elif "timeout" in error_str or "deadline" in error_str:
         return (
-            "❌ Query timeout",
+            "Query timeout",
             "The query took too long to complete. Try a more specific search (e.g., narrow down by organism or platform)."
         )
     elif "authentication" in error_str or "credentials" in error_str:
         return (
-            "❌ Authentication error",
+            "Authentication error",
             "There's an issue with the database credentials. Please contact the administrator."
         )
     elif "no results" in error_str or "zero" in error_str:
         return (
-            "⚠️ No results found",
+            "No results found",
             "Your query didn't match any records. Try using different keywords or organisms."
         )
     elif "rate limit" in error_str:
         return (
-            "❌ Rate limit exceeded",
+            "Rate limit exceeded",
             "You've exceeded your query limit. Please wait before trying again."
         )
     else:
         return (
-            "❌ Unexpected error",
+            "Unexpected error",
             "An unexpected error occurred. Try refreshing the page or clearing the chat."
         )
 
@@ -138,7 +140,7 @@ def load_gcp_credentials():
             return True
         return False
     except Exception as e:
-        st.warning(f"⚠️ Failed to load GCP credentials: {str(e)}")
+        st.warning(f"Failed to load GCP credentials: {str(e)}")
         return False
 
 
@@ -152,7 +154,7 @@ def create_agent():
                 credentials_dict = dict(st.secrets["gcp_service_account"])
             st.session_state.agent = create_sra_agent(credentials=credentials_dict)
         except Exception as e:
-            st.error(f"❌ Failed to initialize agent: {str(e)}")
+            st.error(f"Failed to initialize agent: {str(e)}")
             st.session_state.agent = None
     return st.session_state.agent
 
@@ -216,7 +218,7 @@ def display_sidebar():
             )
 
         st.divider()
-        st.caption("💡 Tip: Ask about genomic data, organisms, sequencing platforms, and more!")
+        st.caption("Tip: Ask about genomic data, organisms, sequencing platforms, and more!")
 
 
 def display_chat_history():
@@ -233,7 +235,7 @@ def handle_user_input():
         can_query, reason = st.session_state.rate_limiter.can_query()
 
         if not can_query:
-            st.error(f"❌ {reason}")
+            st.error(f"{reason}")
             return
 
         # Add user message to chat
@@ -247,7 +249,7 @@ def handle_user_input():
         # Get agent response
         agent = create_agent()
         if agent is None:
-            st.error("❌ Agent is not initialized. Please refresh the page.")
+            st.error("Agent is not initialized. Please refresh the page.")
             st.session_state.messages.pop()
             return
 

@@ -33,13 +33,12 @@ This project demonstrates advanced LangGraph patterns through a conversational A
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/langgraph-agent.git
-cd langgraph-agent
+git clone https://github.com/yourusername/sragent-langgraph.git && cd sragent-langgraph
 ```
 
-2. Install dependencies with Poetry:
+2. Install dependencies with uv:
 ```bash
-poetry install
+uv sync
 ```
 
 3. Set up Streamlit secrets (for web app):
@@ -76,7 +75,7 @@ Access at http://localhost:8501 and enter your password.
 **CLI Interface (Legacy)**:
 ```bash
 # Requires GEMINI_API_KEY in .env file
-poetry run python sra_agent.py
+uv run python -m langgraph_agent.agent
 ```
 
 ## Usage Examples
